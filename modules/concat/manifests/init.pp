@@ -1,131 +1,269 @@
-# Sets up so that you can use fragments to build a final config file,
+# Class: apache
 #
-# @param ensure
-#   Present/Absent
-# @param path
-#   The path to the final file. Use this in case you want to differentiate
-#   between the name of a resource and the file path.  Note: Use the name you
-#   provided in the target of your fragments.
-# @param owner
-#   Who will own the file
-# @param group
-#   Who will own the file
-# @param mode
-#   The mode of the final file
-# @param show_diff
-#   Use metaparam for files to show/hide diffs for reporting when using eyaml
-#   secrets.  Defaults to true
-# @param warn
-#   Adds a normal shell style comment top of the file indicating that it is
-#   built by puppet.
-#   Before 2.0.0, this parameter would add a newline at the end of the warn
-#   message. To improve flexibilty, this was removed. Please add it explicitely
-#   if you need it.
-# @param backup
-#   Controls the filebucketing behavior of the final file and see File type
-#   reference for its use.  Defaults to 'puppet'
-# @param replace
-#   Whether to replace a file that already exists on the local system
-# @param order
-#   Select whether to order associated fragments by 'alpha' or 'numeric'.
-#   Defaults to 'alpha'.
-# @param ensure_newline
-#   Specifies whether to ensure there's a new line at the end of each fragment.
-#   Valid options: 'true' and 'false'. Default value: 'false'.
-# @param selinux_ignore_defaults
-# @param selrange
-# @param selrole
-# @param seltype
-# @param seluser
-# @param validate_cmd
-#   Specifies a validation command to apply to the destination file.
-#   Requires Puppet version 3.5 or newer. Valid options: a string to be passed
-#   to a file resource. Default value: undefined.
-# @param format
-#   Specify what data type to merge the fragments as.
-#   Valid options: 'plain', 'yaml', 'json', 'json-pretty'. Default value: `plain`.
-# @param force
-#   Specifies whether to merge data structures, keeping the values with higher order.
-#   Used when format is specified as a value other than 'plain'.
-#   Valid options: `true` and `false`. Default value: `false`.
+# This class installs Apache
 #
+# Parameters:
 #
-define concat(
-  Enum['present', 'absent']          $ensure                  = 'present',
-  Stdlib::Absolutepath               $path                    = $name,
-  Optional[Variant[String, Integer]] $owner                   = undef,
-  Optional[Variant[String, Integer]] $group                   = undef,
-  String                             $mode                    = '0644',
-  Variant[Boolean, String]           $warn                    = false,
-  Boolean                            $show_diff               = true,
-  Variant[Boolean, String]           $backup                  = 'puppet',
-  Boolean                            $replace                 = true,
-  Enum['alpha','numeric']            $order                   = 'alpha',
-  Boolean                            $ensure_newline          = false,
-  Optional[String]                   $validate_cmd            = undef,
-  Optional[Boolean]                  $selinux_ignore_defaults = undef,
-  Optional[String]                   $selrange                = undef,
-  Optional[String]                   $selrole                 = undef,
-  Optional[String]                   $seltype                 = undef,
-  Optional[String]                   $seluser                 = undef,
-  Optional[String]                   $format                  = 'plain',
-  Optional[Boolean]                  $force                   = false,
-) {
+# Actions:
+#   - Install Apache
+#   - Manage Apache service
+#
+# Requires:
+#
+# Sample Usage:
+#
+class apache (
+  $default_mods         = true,
+  $default_vhost        = true,
+  $default_ssl_vhost    = false,
+  $default_ssl_cert     = $apache::params::default_ssl_cert,
+  $default_ssl_key      = $apache::params::default_ssl_key,
+  $default_ssl_chain    = undef,
+  $default_ssl_ca       = undef,
+  $default_ssl_crl_path = undef,
+  $default_ssl_crl      = undef,
+  $service_enable       = true,
+  $purge_configs        = true,
+  $purge_vdir           = false,
+  $serveradmin          = 'root@localhost',
+  $sendfile             = 'On',
+  $error_documents      = false,
+  $timeout              = '120',
+  $httpd_dir            = $apache::params::httpd_dir,
+  $confd_dir            = $apache::params::confd_dir,
+  $vhost_dir            = $apache::params::vhost_dir,
+  $vhost_enable_dir     = $apache::params::vhost_enable_dir,
+  $mod_dir              = $apache::params::mod_dir,
+  $mod_enable_dir       = $apache::params::mod_enable_dir,
+  $mpm_module           = $apache::params::mpm_module,
+  $conf_template        = $apache::params::conf_template,
+  $servername           = $apache::params::servername,
+  $manage_user          = true,
+  $manage_group         = true,
+  $user                 = $apache::params::user,
+  $group                = $apache::params::group,
+  $keepalive            = $apache::params::keepalive,
+  $keepalive_timeout    = $apache::params::keepalive_timeout,
+  $logroot              = $apache::params::logroot,
+  $ports_file           = $apache::params::ports_file,
+  $server_tokens        = 'OS',
+  $server_signature     = 'On',
+) inherits apache::params {
 
-  $safe_name            = regsubst($name, '[/:~\n\s\+\*\(\)@]', '_', 'G')
-  $default_warn_message = "# This file is managed by Puppet. DO NOT EDIT.\n"
+  package { 'httpd':
+    ensure => installed,
+    name   => $apache::params::apache_name,
+    notify => Class['Apache::Service'],
+  }
 
-  case $warn {
-    true: {
-      $warn_message = $default_warn_message
-      $_append_header = true
+  validate_bool($default_vhost)
+  # true/false is sufficient for both ensure and enable
+  validate_bool($service_enable)
+  if $mpm_module {
+    validate_re($mpm_module, '(prefork|worker|itk)')
+  }
+  validate_re($sendfile, [ '^[oO]n$' , '^[oO]ff$' ])
+
+  # declare the web server user and group
+  # Note: requiring the package means the package ought to create them and not puppet
+  validate_bool($manage_user)
+  if $manage_user {
+    user { $user:
+      ensure  => present,
+      gid     => $group,
+      require => Package['httpd'],
     }
-    false: {
-      $warn_message = ''
-      $_append_header = false
-    }
-    default: {
-      $warn_message = $warn
-      $_append_header = true
+  }
+  validate_bool($manage_group)
+  if $manage_group {
+    group { $group:
+      ensure  => present,
+      require => Package['httpd']
     }
   }
 
-  if $ensure == 'present' {
-    concat_file { $name:
-      tag                     => $safe_name,
-      path                    => $path,
-      owner                   => $owner,
-      group                   => $group,
-      mode                    => $mode,
-      selinux_ignore_defaults => $selinux_ignore_defaults,
-      selrange                => $selrange,
-      selrole                 => $selrole,
-      seltype                 => $seltype,
-      seluser                 => $seluser,
-      replace                 => $replace,
-      backup                  => $backup,
-      show_diff               => $show_diff,
-      order                   => $order,
-      ensure_newline          => $ensure_newline,
-      validate_cmd            => $validate_cmd,
-      format                  => $format,
-      force                   => $force,
-    }
+  class { 'apache::service':
+    service_enable => $service_enable,
+  }
 
-    if $_append_header {
-      concat_fragment { "${name}_header":
-        target  => $name,
-        tag     => $safe_name,
-        content => $warn_message,
-        order   => '0',
-      }
+  # Deprecated backwards-compatibility
+  if $purge_vdir {
+    warning('Class[\'apache\'] parameter purge_vdir is deprecated in favor of purge_configs')
+    $purge_confd = $purge_vdir
+  } else {
+    $purge_confd = $purge_configs
+  }
+
+  Exec {
+    path => '/bin:/sbin:/usr/bin:/usr/sbin',
+  }
+
+  exec { "mkdir ${confd_dir}":
+    creates => $confd_dir,
+    require => Package['httpd'],
+  }
+  file { $confd_dir:
+    ensure  => directory,
+    recurse => true,
+    purge   => $purge_confd,
+    notify  => Class['Apache::Service'],
+    require => Package['httpd'],
+  }
+
+  if ! defined(File[$mod_dir]) {
+    exec { "mkdir ${mod_dir}":
+      creates => $mod_dir,
+      require => Package['httpd'],
+    }
+    file { $mod_dir:
+      ensure  => directory,
+      recurse => true,
+      purge   => $purge_configs,
+      notify  => Class['Apache::Service'],
+      require => Package['httpd'],
+    }
+  }
+
+  if $mod_enable_dir and ! defined(File[$mod_enable_dir]) {
+    $mod_load_dir = $mod_enable_dir
+    exec { "mkdir ${mod_enable_dir}":
+      creates => $mod_enable_dir,
+      require => Package['httpd'],
+    }
+    file { $mod_enable_dir:
+      ensure  => directory,
+      recurse => true,
+      purge   => $purge_configs,
+      notify  => Class['Apache::Service'],
+      require => Package['httpd'],
     }
   } else {
-    concat_file { $name:
-      ensure => $ensure,
-      tag    => $safe_name,
-      path   => $path,
-      backup => $backup,
+    $mod_load_dir = $mod_dir
+  }
+
+  if ! defined(File[$vhost_dir]) {
+    exec { "mkdir ${vhost_dir}":
+      creates => $vhost_dir,
+      require => Package['httpd'],
+    }
+    file { $vhost_dir:
+      ensure  => directory,
+      recurse => true,
+      purge   => $purge_configs,
+      notify  => Class['Apache::Service'],
+      require => Package['httpd'],
+    }
+  }
+
+  if $vhost_enable_dir and ! defined(File[$vhost_enable_dir]) {
+    $vhost_load_dir = $vhost_enable_dir
+    exec { "mkdir ${vhost_load_dir}":
+      creates => $vhost_load_dir,
+      require => Package['httpd'],
+    }
+    file { $vhost_enable_dir:
+      ensure  => directory,
+      recurse => true,
+      purge   => $purge_configs,
+      notify  => Class['Apache::Service'],
+      require => Package['httpd'],
+    }
+  } else {
+    $vhost_load_dir = $vhost_dir
+  }
+
+  concat { $ports_file:
+    owner   => 'root',
+    group   => 'root',
+    mode    => '0644',
+    notify  => Class['Apache::Service'],
+    require => Package['httpd'],
+  }
+  concat::fragment { 'Apache ports header':
+    target  => $ports_file,
+    content => template('apache/ports_header.erb')
+  }
+
+  if $apache::params::conf_dir and $apache::params::conf_file {
+    case $::osfamily {
+      'debian': {
+        $docroot              = '/var/www'
+        $pidfile              = '${APACHE_PID_FILE}'
+        $error_log            = 'error.log'
+        $error_documents_path = '/usr/share/apache2/error'
+        $scriptalias          = '/usr/lib/cgi-bin'
+        $access_log_file      = 'access.log'
+      }
+      'redhat': {
+        $docroot              = '/var/www/html'
+        $pidfile              = 'run/httpd.pid'
+        $error_log            = 'error_log'
+        $error_documents_path = '/var/www/error'
+        $scriptalias          = '/var/www/cgi-bin'
+        $access_log_file      = 'access_log'
+      }
+      default: {
+        fail("Unsupported osfamily ${::osfamily}")
+      }
+    }
+    # Template uses:
+    # - $httpd_dir
+    # - $pidfile
+    # - $user
+    # - $group
+    # - $logroot
+    # - $error_log
+    # - $sendfile
+    # - $mod_dir
+    # - $ports_file
+    # - $confd_dir
+    # - $vhost_dir
+    # - $error_documents
+    # - $error_documents_path
+    # - $keepalive
+    # - $keepalive_timeout
+    file { "${apache::params::conf_dir}/${apache::params::conf_file}":
+      ensure  => file,
+      content => template($conf_template),
+      notify  => Class['Apache::Service'],
+      require => Package['httpd'],
+    }
+
+    # preserve back-wards compatibility to the times when default_mods was
+    # only a boolean value. Now it can be an array (too)
+    if is_array($default_mods) {
+      class { 'apache::default_mods':
+        all  => false,
+        mods => $default_mods,
+      }
+    } else {
+      class { 'apache::default_mods':
+        all => $default_mods,
+      }
+    }
+    if $mpm_module {
+      class { "apache::mod::${mpm_module}": }
+    }
+    if $default_vhost {
+      apache::vhost { 'default':
+        port            => 80,
+        docroot         => $docroot,
+        scriptalias     => $scriptalias,
+        serveradmin     => $serveradmin,
+        access_log_file => $access_log_file,
+        priority        => '15',
+      }
+    }
+    if $default_ssl_vhost {
+      apache::vhost { 'default-ssl':
+        port            => 443,
+        ssl             => true,
+        docroot         => $docroot,
+        scriptalias     => $scriptalias,
+        serveradmin     => $serveradmin,
+        access_log_file => "ssl_${access_log_file}",
+        priority        => '15',
+      }
     }
   }
 }
